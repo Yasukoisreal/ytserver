@@ -4,20 +4,16 @@ import traceback
 from flask import Flask, request, redirect, jsonify
 from cachetools import TTLCache
 import yt_dlp
-from ytmusicapi import YTMusic # THÊM: Thư viện trà trộn vào YouTube Music
+from ytmusicapi import YTMusic
 
 app = Flask(__name__)
 
-# TỐI ƯU 1: CACHE CHỐNG TRÀN RAM
-url_cache = TTLCache(maxsize=1000, ttl=7200)
+# Giảm thời gian Cache xuống 30 phút để tránh dính link hết hạn (Expired Token)
+url_cache = TTLCache(maxsize=1000, ttl=1800)
 
-# TỐI ƯU 2: KHÓA BẢO MẬT
 SECRET_KEY = os.environ.get("APP_SECRET_KEY", "LumiaWP81-An")
+ytmusic = YTMusic()
 
-# KHỞI TẠO BỘ TÌM KIẾM NHẠC CHUẨN STUDIO
-ytmusic = YTMusic() 
-
-# TỐI ƯU 3: NẠP COOKIE
 cookie_data = os.environ.get('COOKIE_DATA')
 if cookie_data:
     with open('cookies.txt', 'w', encoding='utf-8') as f:
@@ -25,9 +21,8 @@ if cookie_data:
 
 @app.route('/')
 def home():
-    return "🚀 API Railway (Bản Tối Thượng - Chuyên Nhạc Studio) đang hoạt động!"
+    return "🚀 API Railway (Fix Lỗi 403 & SSL) đang hoạt động!"
 
-# -------------- TÍNH NĂNG MỚI: TÌM KIẾM NHẠC CHUẨN -----------------
 @app.route('/api/search')
 def search_music():
     client_key = request.args.get("key")
@@ -39,7 +34,6 @@ def search_music():
         return jsonify({"error": "Missing query"}), 400
 
     try:
-        # LỌC NGHIÊM NGẶT: Chỉ tìm "songs" (Bản thu âm Audio gốc), loại bỏ hoàn toàn Video/MV
         search_results = ytmusic.search(query, filter="songs", limit=15)
         
         items = []
@@ -47,14 +41,11 @@ def search_music():
             try:
                 video_id = item['videoId']
                 title = item['title']
-                # Gộp tên các ca sĩ lại (Ví dụ: Alan Walker, Ava Max)
                 artists = ", ".join([artist['name'] for artist in item.get('artists', [])])
                 
-                # Lấy ảnh bìa vuông cực đẹp của Album
                 thumbnails = item.get('thumbnails', [])
                 thumb_url = thumbnails[-1]['url'] if thumbnails else ""
                 
-                # MÔ PHỎNG GIẢ LẬP JSON CỦA GOOGLE API: Để app C# đọc được ngay mà không sinh lỗi
                 items.append({
                     "id": {"videoId": video_id},
                     "snippet": {
@@ -76,7 +67,6 @@ def search_music():
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
 
-# -------------- TÍNH NĂNG CŨ: PHÁT NHẠC (GIỮ NGUYÊN) -----------------
 @app.route('/api/play')
 def play_audio():
     client_key = request.args.get("key")
@@ -94,7 +84,8 @@ def play_audio():
     youtube_url = f"https://www.youtube.com/watch?v={video_id}"
     ydl_opts = {
         'format': '140/bestaudio[ext=m4a]/18/best[ext=mp4]',
-        'extractor_args': {'youtube': {'client': ['android', 'ios', 'tv', 'web']}},
+        # BÍ KÍP 1: Ép yt-dlp dùng client iOS để lách luật khóa IP (IP Binding) của Google
+        'extractor_args': {'youtube': {'client': ['ios', 'tv', 'web']}}, 
         'youtube_include_dash_manifest': False,
         'youtube_include_hls_manifest': False,
         'noplaylist': True,
@@ -112,6 +103,10 @@ def play_audio():
 
             if not audio_url:
                 return "Không tìm thấy định dạng âm thanh.", 500
+
+            # BÍ KÍP 2: Đánh lừa chứng chỉ bảo mật (SSL/TLS) của Windows Phone 8.1
+            # Hạ cấp xuống HTTP thuần sẽ giúp trình phát nhạc kết nối mượt mà ngay lập tức!
+            audio_url = audio_url.replace("https://", "http://")
 
             url_cache[video_id] = audio_url
             return redirect(audio_url)
