@@ -8,16 +8,17 @@ from ytmusicapi import YTMusic
 
 app = Flask(__name__)
 
+# Cache lưu trữ link 30 phút
 url_cache = TTLCache(maxsize=1000, ttl=1800)
 SECRET_KEY = os.environ.get("APP_SECRET_KEY", "LumiaWP81-An")
 ytmusic = YTMusic()
 
 @app.route('/')
 def home():
-    return "🚀 API Railway (Bảng Xếp Hạng Studio + Proxy) đang hoạt động!"
+    return "🚀 API Railway (Fix Lỗi Trống Tab Home) đang hoạt động!"
 
 # =======================================================
-# TÍNH NĂNG MỚI: LẤY BẢNG XẾP HẠNG NHẠC GỐC THEO QUỐC GIA
+# LẤY BẢNG XẾP HẠNG (ĐÃ FIX LỖI RỖNG)
 # =======================================================
 @app.route('/api/trending')
 def trending_music():
@@ -25,30 +26,30 @@ def trending_music():
     if client_key != SECRET_KEY:
         return jsonify({"error": "Unauthorized!"}), 403
 
-    # Mặc định là VN nếu điện thoại không gửi mã quốc gia
     region = request.args.get('region', 'VN') 
     
     try:
-        # Gọi API lấy bảng xếp hạng của YouTube Music theo quốc gia
         charts = ytmusic.get_charts(country=region)
-        
-        # Ưu tiên lấy Top Songs (Nhạc Audio gốc), nếu không có thì lấy mục Trending
         chart_items = []
-        if 'tracks' in charts and 'items' in charts['tracks']:
-            chart_items = charts['tracks']['items']
-        elif 'trending' in charts and 'items' in charts['trending']:
-            chart_items = charts['trending']['items']
+        
+        # Quét tất cả các danh mục có thể chứa nhạc
+        for key in ['videos', 'songs', 'trending']:
+            if key in charts and 'items' in charts[key]:
+                chart_items.extend(charts[key]['items'])
+        
+        # KẾ HOẠCH DỰ PHÒNG: Nếu API YouTube lỗi không trả về Chart, tự động Search Top bài hát
+        if not chart_items:
+            chart_items = ytmusic.search(f"top songs {region}", filter="songs", limit=15)
             
         items = []
         for item in chart_items:
             try:
                 video_id = item['videoId']
                 title = item['title']
-                artists = ", ".join([artist['name'] for artist in item.get('artists', [])])
+                artists = ", ".join([artist['name'] for artist in item.get('artists', [])]) if 'artists' in item else "Unknown Artist"
                 thumbnails = item.get('thumbnails', [])
                 thumb_url = thumbnails[-1]['url'] if thumbnails else ""
                 
-                # Đóng gói giả lập chuẩn JSON để C# đọc mượt mà
                 items.append({
                     "id": {"videoId": video_id},
                     "snippet": {
@@ -64,14 +65,15 @@ def trending_music():
             except Exception:
                 continue
                 
-        return jsonify({"items": items})
+        # Trả về đúng 15 bài đầu tiên để App Lumia chạy mượt
+        return jsonify({"items": items[:15]})
 
     except Exception as e:
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
 
 # =======================================================
-# TÌM KIẾM BÀI HÁT (Giữ nguyên)
+# TÌM KIẾM BÀI HÁT
 # =======================================================
 @app.route('/api/search')
 def search_music():
@@ -114,7 +116,7 @@ def search_music():
         return jsonify({"error": str(e)}), 500
 
 # =======================================================
-# BƠM NHẠC TRỰC TIẾP (Proxy - Giữ nguyên)
+# BƠM NHẠC TRỰC TIẾP (Proxy)
 # =======================================================
 @app.route('/api/play')
 def play_audio():
