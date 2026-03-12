@@ -15,7 +15,7 @@ ytmusic = YTMusic()
 
 @app.route('/')
 def home():
-    return "🚀 API Railway (Proxy Streaming) đang hoạt động mượt mà!"
+    return "🚀 API Railway (Proxy Siêu Tốc WP8.1) đang hoạt động!"
 
 @app.route('/api/search')
 def search_music():
@@ -50,7 +50,7 @@ def search_music():
                         }
                     }
                 })
-            except Exception as e:
+            except Exception:
                 continue
         return jsonify({"items": items})
     except Exception as e:
@@ -69,19 +69,17 @@ def play_audio():
 
     audio_url = url_cache.get(video_id)
 
-    # Nếu chưa có link trong RAM thì gọi yt-dlp để đào link
     if not audio_url:
         youtube_url = f"https://www.youtube.com/watch?v={video_id}"
         ydl_opts = {
             'format': '140/bestaudio[ext=m4a]/18/best[ext=mp4]',
-            'extractor_args': {'youtube': {'client': ['android', 'ios', 'tv', 'web']}}, 
+            'extractor_args': {'youtube': {'client': ['ios', 'tv', 'web']}}, 
             'youtube_include_dash_manifest': False,
             'youtube_include_hls_manifest': False,
             'noplaylist': True,
             'quiet': True,
             'no_warnings': True
         }
-        
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info_dict = ydl.extract_info(youtube_url, download=False)
@@ -93,38 +91,37 @@ def play_audio():
             traceback.print_exc()
             return f"🚨 Lỗi yt-dlp: {str(e)}", 500
 
-    # =======================================================
-    # BÍ KÍP TỐI THƯỢNG: SERVER PROXY STREAMING
-    # Ép server Railway tự làm "ống hút" tải nhạc rồi bơm về Lumia 530
-    # =======================================================
     try:
         req_headers = {}
-        # Hứng header "Range" từ điện thoại để giữ được chức năng tua nhạc (Seek)
+        # Hứng header "Range" để hỗ trợ tua nhạc mượt mà
         if "Range" in request.headers:
             req_headers["Range"] = request.headers["Range"]
             
         r = requests.get(audio_url, headers=req_headers, stream=True)
         
-        # Nếu Google từ chối, xóa link chết khỏi RAM để lần sau đào link mới
+        # Nếu link bị Google khóa IP thì xóa cache lập tức
         if r.status_code in [403, 401]:
             if video_id in url_cache:
                 del url_cache[video_id]
-            return "🚨 Bị khóa IP. Đã xóa cache, bấm chọn lại bài hát nhé!", 403
+            return "🚨 Bị khóa IP. Đã xóa cache, vui lòng chọn lại bài hát!", 403
 
-        # Đóng gói dòng chảy (chunk) để tiết kiệm RAM cho Server Railway
+        # Bơm dữ liệu với cục to hơn (64KB) để lấp đầy bộ đệm WP8.1 thật nhanh
         def generate():
-            for chunk in r.iter_content(chunk_size=16384):
+            for chunk in r.iter_content(chunk_size=65536):
                 if chunk:
                     yield chunk
 
-        resp = Response(generate(), status=r.status_code)
-        
-        # Bê y nguyên các thông số âm lượng, độ dài bài hát từ Google sang Lumia 530
-        for key in ["Content-Type", "Accept-Ranges", "Content-Length", "Content-Range"]:
-            if key in r.headers:
-                resp.headers[key] = r.headers[key]
+        # =======================================================
+        # BÍ KÍP CHỐNG TREO: BÊ NGUYÊN HEADERS CỦA GOOGLE ĐỂ LỪA WP8.1
+        # =======================================================
+        excluded_headers = ['content-encoding', 'transfer-encoding', 'connection']
+        resp_headers = []
+        for k, v in r.headers.items():
+            if k.lower() not in excluded_headers:
+                resp_headers.append((k, v))
                 
-        return resp
+        # direct_passthrough=True vô cùng quan trọng, nó cấm Flask tự đổi header
+        return Response(generate(), status=r.status_code, headers=resp_headers, direct_passthrough=True)
 
     except Exception as e:
         traceback.print_exc()
