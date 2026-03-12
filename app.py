@@ -8,15 +8,71 @@ from ytmusicapi import YTMusic
 
 app = Flask(__name__)
 
-# Cache lưu trữ link 30 phút
 url_cache = TTLCache(maxsize=1000, ttl=1800)
 SECRET_KEY = os.environ.get("APP_SECRET_KEY", "LumiaWP81-An")
 ytmusic = YTMusic()
 
 @app.route('/')
 def home():
-    return "🚀 API Railway (Proxy Siêu Tốc WP8.1) đang hoạt động!"
+    return "🚀 API Railway (Bảng Xếp Hạng Studio + Proxy) đang hoạt động!"
 
+# =======================================================
+# TÍNH NĂNG MỚI: LẤY BẢNG XẾP HẠNG NHẠC GỐC THEO QUỐC GIA
+# =======================================================
+@app.route('/api/trending')
+def trending_music():
+    client_key = request.args.get("key")
+    if client_key != SECRET_KEY:
+        return jsonify({"error": "Unauthorized!"}), 403
+
+    # Mặc định là VN nếu điện thoại không gửi mã quốc gia
+    region = request.args.get('region', 'VN') 
+    
+    try:
+        # Gọi API lấy bảng xếp hạng của YouTube Music theo quốc gia
+        charts = ytmusic.get_charts(country=region)
+        
+        # Ưu tiên lấy Top Songs (Nhạc Audio gốc), nếu không có thì lấy mục Trending
+        chart_items = []
+        if 'tracks' in charts and 'items' in charts['tracks']:
+            chart_items = charts['tracks']['items']
+        elif 'trending' in charts and 'items' in charts['trending']:
+            chart_items = charts['trending']['items']
+            
+        items = []
+        for item in chart_items:
+            try:
+                video_id = item['videoId']
+                title = item['title']
+                artists = ", ".join([artist['name'] for artist in item.get('artists', [])])
+                thumbnails = item.get('thumbnails', [])
+                thumb_url = thumbnails[-1]['url'] if thumbnails else ""
+                
+                # Đóng gói giả lập chuẩn JSON để C# đọc mượt mà
+                items.append({
+                    "id": {"videoId": video_id},
+                    "snippet": {
+                        "title": title,
+                        "channelTitle": artists,
+                        "thumbnails": {
+                            "default": {"url": thumb_url},
+                            "medium": {"url": thumb_url},
+                            "high": {"url": thumb_url}
+                        }
+                    }
+                })
+            except Exception:
+                continue
+                
+        return jsonify({"items": items})
+
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+# =======================================================
+# TÌM KIẾM BÀI HÁT (Giữ nguyên)
+# =======================================================
 @app.route('/api/search')
 def search_music():
     client_key = request.args.get("key")
@@ -57,6 +113,9 @@ def search_music():
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
 
+# =======================================================
+# BƠM NHẠC TRỰC TIẾP (Proxy - Giữ nguyên)
+# =======================================================
 @app.route('/api/play')
 def play_audio():
     client_key = request.args.get("key")
@@ -93,34 +152,27 @@ def play_audio():
 
     try:
         req_headers = {}
-        # Hứng header "Range" để hỗ trợ tua nhạc mượt mà
         if "Range" in request.headers:
             req_headers["Range"] = request.headers["Range"]
             
         r = requests.get(audio_url, headers=req_headers, stream=True)
         
-        # Nếu link bị Google khóa IP thì xóa cache lập tức
         if r.status_code in [403, 401]:
             if video_id in url_cache:
                 del url_cache[video_id]
             return "🚨 Bị khóa IP. Đã xóa cache, vui lòng chọn lại bài hát!", 403
 
-        # Bơm dữ liệu với cục to hơn (64KB) để lấp đầy bộ đệm WP8.1 thật nhanh
         def generate():
             for chunk in r.iter_content(chunk_size=65536):
                 if chunk:
                     yield chunk
 
-        # =======================================================
-        # BÍ KÍP CHỐNG TREO: BÊ NGUYÊN HEADERS CỦA GOOGLE ĐỂ LỪA WP8.1
-        # =======================================================
         excluded_headers = ['content-encoding', 'transfer-encoding', 'connection']
         resp_headers = []
         for k, v in r.headers.items():
             if k.lower() not in excluded_headers:
                 resp_headers.append((k, v))
                 
-        # direct_passthrough=True vô cùng quan trọng, nó cấm Flask tự đổi header
         return Response(generate(), status=r.status_code, headers=resp_headers, direct_passthrough=True)
 
     except Exception as e:
