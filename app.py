@@ -13,12 +13,20 @@ url_cache = TTLCache(maxsize=1000, ttl=1800)
 SECRET_KEY = os.environ.get("APP_SECRET_KEY", "LumiaWP81-An")
 ytmusic = YTMusic()
 
+# =======================================================
+# BÍ KÍP: NẠP COOKIE CHỐNG BOT YOUTUBE
+# =======================================================
+cookie_data = os.environ.get('COOKIE_DATA')
+if cookie_data:
+    with open('cookies.txt', 'w', encoding='utf-8') as f:
+        f.write(cookie_data)
+
 @app.route('/')
 def home():
-    return "🚀 API Railway (Fix Lỗi Trống Tab Home) đang hoạt động!"
+    return "🚀 API Railway (Full Tính Năng + Đã Nạp Cookie) đang hoạt động!"
 
 # =======================================================
-# LẤY BẢNG XẾP HẠNG (ĐÃ FIX LỖI RỖNG)
+# LẤY BẢNG XẾP HẠNG NHẠC STUDIO (TAB HOME)
 # =======================================================
 @app.route('/api/trending')
 def trending_music():
@@ -32,12 +40,10 @@ def trending_music():
         charts = ytmusic.get_charts(country=region)
         chart_items = []
         
-        # Quét tất cả các danh mục có thể chứa nhạc
         for key in ['videos', 'songs', 'trending']:
             if key in charts and 'items' in charts[key]:
                 chart_items.extend(charts[key]['items'])
         
-        # KẾ HOẠCH DỰ PHÒNG: Nếu API YouTube lỗi không trả về Chart, tự động Search Top bài hát
         if not chart_items:
             chart_items = ytmusic.search(f"top songs {region}", filter="songs", limit=15)
             
@@ -65,7 +71,6 @@ def trending_music():
             except Exception:
                 continue
                 
-        # Trả về đúng 15 bài đầu tiên để App Lumia chạy mượt
         return jsonify({"items": items[:15]})
 
     except Exception as e:
@@ -73,7 +78,7 @@ def trending_music():
         return jsonify({"error": str(e)}), 500
 
 # =======================================================
-# TÌM KIẾM BÀI HÁT
+# TÌM KIẾM BÀI HÁT (TAB SEARCH)
 # =======================================================
 @app.route('/api/search')
 def search_music():
@@ -116,7 +121,7 @@ def search_music():
         return jsonify({"error": str(e)}), 500
 
 # =======================================================
-# BƠM NHẠC TRỰC TIẾP (Proxy)
+# BƠM NHẠC TRỰC TIẾP (PROXY STREAMING + KÈM COOKIE)
 # =======================================================
 @app.route('/api/play')
 def play_audio():
@@ -141,6 +146,11 @@ def play_audio():
             'quiet': True,
             'no_warnings': True
         }
+        
+        # KIỂM TRA VÀ GẮN COOKIE VÀO LỆNH TẢI
+        if os.path.exists('cookies.txt'):
+            ydl_opts['cookiefile'] = 'cookies.txt'
+
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info_dict = ydl.extract_info(youtube_url, download=False)
