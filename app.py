@@ -13,73 +13,10 @@ url_cache = TTLCache(maxsize=1000, ttl=1800)
 SECRET_KEY = os.environ.get("APP_SECRET_KEY", "LumiaWP81-An")
 ytmusic = YTMusic()
 
-# =======================================================
-# BÍ KÍP: NẠP COOKIE CHỐNG BOT YOUTUBE
-# =======================================================
-cookie_data = os.environ.get('COOKIE_DATA')
-if cookie_data:
-    with open('cookies.txt', 'w', encoding='utf-8') as f:
-        f.write(cookie_data)
-
 @app.route('/')
 def home():
-    return "🚀 API Railway (Full Tính Năng + Đã Nạp Cookie) đang hoạt động!"
+    return "🚀 API Railway (Proxy Siêu Tốc WP8.1) đang hoạt động!"
 
-# =======================================================
-# LẤY BẢNG XẾP HẠNG NHẠC STUDIO (TAB HOME)
-# =======================================================
-@app.route('/api/trending')
-def trending_music():
-    client_key = request.args.get("key")
-    if client_key != SECRET_KEY:
-        return jsonify({"error": "Unauthorized!"}), 403
-
-    region = request.args.get('region', 'VN') 
-    
-    try:
-        charts = ytmusic.get_charts(country=region)
-        chart_items = []
-        
-        for key in ['videos', 'songs', 'trending']:
-            if key in charts and 'items' in charts[key]:
-                chart_items.extend(charts[key]['items'])
-        
-        if not chart_items:
-            chart_items = ytmusic.search(f"top songs {region}", filter="songs", limit=15)
-            
-        items = []
-        for item in chart_items:
-            try:
-                video_id = item['videoId']
-                title = item['title']
-                artists = ", ".join([artist['name'] for artist in item.get('artists', [])]) if 'artists' in item else "Unknown Artist"
-                thumbnails = item.get('thumbnails', [])
-                thumb_url = thumbnails[-1]['url'] if thumbnails else ""
-                
-                items.append({
-                    "id": {"videoId": video_id},
-                    "snippet": {
-                        "title": title,
-                        "channelTitle": artists,
-                        "thumbnails": {
-                            "default": {"url": thumb_url},
-                            "medium": {"url": thumb_url},
-                            "high": {"url": thumb_url}
-                        }
-                    }
-                })
-            except Exception:
-                continue
-                
-        return jsonify({"items": items[:15]})
-
-    except Exception as e:
-        traceback.print_exc()
-        return jsonify({"error": str(e)}), 500
-
-# =======================================================
-# TÌM KIẾM BÀI HÁT (TAB SEARCH)
-# =======================================================
 @app.route('/api/search')
 def search_music():
     client_key = request.args.get("key")
@@ -120,9 +57,6 @@ def search_music():
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
 
-# =======================================================
-# BƠM NHẠC TRỰC TIẾP (PROXY STREAMING + KÈM COOKIE)
-# =======================================================
 @app.route('/api/play')
 def play_audio():
     client_key = request.args.get("key")
@@ -146,11 +80,6 @@ def play_audio():
             'quiet': True,
             'no_warnings': True
         }
-        
-        # KIỂM TRA VÀ GẮN COOKIE VÀO LỆNH TẢI
-        if os.path.exists('cookies.txt'):
-            ydl_opts['cookiefile'] = 'cookies.txt'
-
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info_dict = ydl.extract_info(youtube_url, download=False)
@@ -164,27 +93,34 @@ def play_audio():
 
     try:
         req_headers = {}
+        # Hứng header "Range" để hỗ trợ tua nhạc mượt mà
         if "Range" in request.headers:
             req_headers["Range"] = request.headers["Range"]
             
         r = requests.get(audio_url, headers=req_headers, stream=True)
         
+        # Nếu link bị Google khóa IP thì xóa cache lập tức
         if r.status_code in [403, 401]:
             if video_id in url_cache:
                 del url_cache[video_id]
             return "🚨 Bị khóa IP. Đã xóa cache, vui lòng chọn lại bài hát!", 403
 
+        # Bơm dữ liệu với cục to hơn (64KB) để lấp đầy bộ đệm WP8.1 thật nhanh
         def generate():
             for chunk in r.iter_content(chunk_size=65536):
                 if chunk:
                     yield chunk
 
+        # =======================================================
+        # BÍ KÍP CHỐNG TREO: BÊ NGUYÊN HEADERS CỦA GOOGLE ĐỂ LỪA WP8.1
+        # =======================================================
         excluded_headers = ['content-encoding', 'transfer-encoding', 'connection']
         resp_headers = []
         for k, v in r.headers.items():
             if k.lower() not in excluded_headers:
                 resp_headers.append((k, v))
                 
+        # direct_passthrough=True vô cùng quan trọng, nó cấm Flask tự đổi header
         return Response(generate(), status=r.status_code, headers=resp_headers, direct_passthrough=True)
 
     except Exception as e:
