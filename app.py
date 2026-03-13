@@ -15,8 +15,66 @@ ytmusic = YTMusic()
 
 @app.route('/')
 def home():
-    return "🚀 API Railway (Proxy Siêu Tốc WP8.1) đang hoạt động!"
+    return "🚀 API Railway (Fix Lỗi Trống Tab Home) đang hoạt động!"
 
+# =======================================================
+# LẤY BẢNG XẾP HẠNG (ĐÃ FIX LỖI RỖNG)
+# =======================================================
+@app.route('/api/trending')
+def trending_music():
+    client_key = request.args.get("key")
+    if client_key != SECRET_KEY:
+        return jsonify({"error": "Unauthorized!"}), 403
+
+    region = request.args.get('region', 'VN') 
+    
+    try:
+        charts = ytmusic.get_charts(country=region)
+        chart_items = []
+        
+        # Quét tất cả các danh mục có thể chứa nhạc
+        for key in ['videos', 'songs', 'trending']:
+            if key in charts and 'items' in charts[key]:
+                chart_items.extend(charts[key]['items'])
+        
+        # KẾ HOẠCH DỰ PHÒNG: Nếu API YouTube lỗi không trả về Chart, tự động Search Top bài hát
+        if not chart_items:
+            chart_items = ytmusic.search(f"top songs {region}", filter="songs", limit=15)
+            
+        items = []
+        for item in chart_items:
+            try:
+                video_id = item['videoId']
+                title = item['title']
+                artists = ", ".join([artist['name'] for artist in item.get('artists', [])]) if 'artists' in item else "Unknown Artist"
+                thumbnails = item.get('thumbnails', [])
+                thumb_url = thumbnails[-1]['url'] if thumbnails else ""
+                
+                items.append({
+                    "id": {"videoId": video_id},
+                    "snippet": {
+                        "title": title,
+                        "channelTitle": artists,
+                        "thumbnails": {
+                            "default": {"url": thumb_url},
+                            "medium": {"url": thumb_url},
+                            "high": {"url": thumb_url}
+                        }
+                    }
+                })
+            except Exception:
+                continue
+                
+        # Trả về đúng 15 bài đầu tiên để App Lumia chạy mượt
+        return jsonify({"items": items[:15]})
+
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+# =======================================================
+# TÌM KIẾM BÀI HÁT
+# =======================================================
 @app.route('/api/search')
 def search_music():
     client_key = request.args.get("key")
@@ -57,6 +115,9 @@ def search_music():
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
 
+# =======================================================
+# BƠM NHẠC TRỰC TIẾP (Proxy)
+# =======================================================
 @app.route('/api/play')
 def play_audio():
     client_key = request.args.get("key")
@@ -93,34 +154,27 @@ def play_audio():
 
     try:
         req_headers = {}
-        # Hứng header "Range" để hỗ trợ tua nhạc mượt mà
         if "Range" in request.headers:
             req_headers["Range"] = request.headers["Range"]
             
         r = requests.get(audio_url, headers=req_headers, stream=True)
         
-        # Nếu link bị Google khóa IP thì xóa cache lập tức
         if r.status_code in [403, 401]:
             if video_id in url_cache:
                 del url_cache[video_id]
             return "🚨 Bị khóa IP. Đã xóa cache, vui lòng chọn lại bài hát!", 403
 
-        # Bơm dữ liệu với cục to hơn (64KB) để lấp đầy bộ đệm WP8.1 thật nhanh
         def generate():
             for chunk in r.iter_content(chunk_size=65536):
                 if chunk:
                     yield chunk
 
-        # =======================================================
-        # BÍ KÍP CHỐNG TREO: BÊ NGUYÊN HEADERS CỦA GOOGLE ĐỂ LỪA WP8.1
-        # =======================================================
         excluded_headers = ['content-encoding', 'transfer-encoding', 'connection']
         resp_headers = []
         for k, v in r.headers.items():
             if k.lower() not in excluded_headers:
                 resp_headers.append((k, v))
                 
-        # direct_passthrough=True vô cùng quan trọng, nó cấm Flask tự đổi header
         return Response(generate(), status=r.status_code, headers=resp_headers, direct_passthrough=True)
 
     except Exception as e:
